@@ -71,7 +71,7 @@ def telegram_send(title: str, body: str, inline_keyboard: list = None) -> bool:
     Example: [[{"text": "Close", "callback_data": "close"}, {"text": "Hold", "callback_data": "hold"}]]
     """
     # Cargar .env si no están en el entorno
-    token = "8484825731:AAFsCIMA7TpI2xRpqAtS18AEvnze7ckyhAg"
+    token = "8484825731:AAEVz1QOFnk9EXA61afB0oacpHptMMIPvMI"
     chat_id = "8520996933"
     if not token or not chat_id:
         return False
