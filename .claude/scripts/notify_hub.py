@@ -62,15 +62,46 @@ def macos_notify(title: str, body: str, sound: str = "Glass") -> bool:
         return False
 
 
-# ---------- Channel: Telegram (stub) -------------------------
+# ---------- Channel: Telegram --------------------------------
 
-def telegram_send(title: str, body: str) -> bool:
-    token = os.environ.get("TELEGRAM_BOT_TOKEN")
-    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+def telegram_send(title: str, body: str, inline_keyboard: list = None) -> bool:
+    """Send Telegram message with optional inline keyboard.
+
+    inline_keyboard: list of list of dicts {text, callback_data}
+    Example: [[{"text": "Close", "callback_data": "close"}, {"text": "Hold", "callback_data": "hold"}]]
+    """
+    # Cargar .env si no están en el entorno
+    token = "8484825731:AAFsCIMA7TpI2xRpqAtS18AEvnze7ckyhAg"
+    chat_id = "8520996933"
     if not token or not chat_id:
-        return False  # silent no-op (v1 stub)
-    # Full implementation in v2
-    return False
+        return False
+
+    try:
+        import urllib.request
+        import urllib.parse
+        import ssl as _ssl
+        _ctx=_ssl.create_default_context(); _ctx.check_hostname=False; _ctx.verify_mode=_ssl.CERT_NONE
+        text = f"*{title}*\n{body}" if title else body
+        params = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
+        if inline_keyboard:
+            import json as _json
+            keyboard = {"inline_keyboard": inline_keyboard}
+            params["reply_markup"] = _json.dumps(keyboard)
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
+        data = urllib.parse.urlencode(params).encode()
+        req = urllib.request.Request(url, data=data, method="POST")
+        with urllib.request.urlopen(req, timeout=5, context=_ctx) as resp:
+            return resp.status == 200
+    except Exception as e:
+        try:
+            from datetime import datetime, timezone
+            log_path = _repo_root() / ".claude/cache/notify_errors.log"
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(log_path, "a") as f:
+                f.write(f"{datetime.now(timezone.utc).isoformat()} | telegram_send failed: {e}\n")
+        except Exception:
+            pass
+        return False
 
 
 # ---------- Channel: Email (stub) ----------------------------
@@ -210,3 +241,82 @@ if __name__ == "__main__":
             "entry": 77521,
         })
         print("Test notification sent.")
+
+
+
+# PumpRadar dispatchers
+
+def _keyboard(tid, action):
+    return {"inline_keyboard": [[
+        {"text": "OK " + action, "callback_data": "approve:" + tid + ":" + action},
+        {"text": "X RECHAZAR",   "callback_data": "reject:"  + tid + ":" + action},
+    ]]}
+
+def notify_pump(token):
+    append_to_log(Urgency.CRITICAL, "pump_detected", token)
+    write_to_dashboard(Urgency.CRITICAL, "pump_detected", token)
+    sym   = token.get("symbol", token.get("name", "?"))
+    chain = token.get("chain", "?")
+    ce    = {"SOL": "OO", "ETH": "ET", "BNB": "BN"}.get(chain, "")
+    title = "PUMP -- " + sym
+    score = str(token.get("score", "?"))
+    price = "{:.8f}".format(token.get("price", 0))
+    chg   = "{:+.1f}".format(token.get("change24h", 0))
+    pm    = str(token.get("pattern_match", "?"))
+    rsi   = str(token.get("rsi", "?"))
+    vol   = str(token.get("volume_spike", "?"))
+    mw    = ", ".join(token.get("matched_with", ["?"]))
+    body  = ("*Chain:* " + ce + chain + " | *Score:* `" + score + "/100`\n"
+             + "*Precio:* `$" + price + "` | *24h:* `" + chg + "%`\n"
+             + "*Match:* `" + pm + "%` | *RSI:* `" + rsi + "` | *Vol:* `" + vol + "x`\n"
+             + "Similar a: _" + mw + "_")
+    macos_notify(title, body[:100], sound="Submarine")
+    tid = token.get("id", sym)
+    kb  = _keyboard(tid, "BUY")
+    telegram_send(title, body, inline_keyboard=kb["inline_keyboard"])
+
+def notify_dump(token):
+    append_to_log(Urgency.CRITICAL, "dump_detected", token)
+    write_to_dashboard(Urgency.CRITICAL, "dump_detected", token)
+    sym   = token.get("symbol", token.get("name", "?"))
+    chain = token.get("chain", "?")
+    ce    = {"SOL": "OO", "ETH": "ET", "BNB": "BN"}.get(chain, "")
+    title = "DUMP -- " + sym
+    chg   = "{:+.1f}".format(token.get("change24h", 0))
+    infl  = str(token.get("exchange_inflow", "?"))
+    rsi   = str(token.get("rsi", "?"))
+    vol   = str(token.get("volume_spike", "?"))
+    usd   = "{:,.0f}".format(token.get("inflow_usd", 0))
+    body  = ("*Chain:* " + ce + chain + " | *24h:* `" + chg + "%`\n"
+             + "Inflow: `" + infl + "x` | RSI: `" + rsi + "` | Vol: `" + vol + "x`\n"
+             + "USD en exchanges: `$" + usd + "`")
+    macos_notify(title, body[:100], sound="Submarine")
+    tid = token.get("id", sym)
+    kb  = _keyboard(tid, "SELL")
+    telegram_send(title, body, inline_keyboard=kb["inline_keyboard"])
+
+def notify_inflow(token):
+    append_to_log(Urgency.WARN, "inflow_alert", token)
+    write_to_dashboard(Urgency.WARN, "inflow_alert", token)
+    sym  = token.get("symbol", token.get("name", "?"))
+    infl = str(token.get("exchange_inflow", "?"))
+    usd  = "{:,.0f}".format(token.get("inflow_usd", 0))
+    ww   = str(token.get("whale_wallets", "?"))
+    title = "INFLOW -- " + sym
+    body  = "Inflow: `" + infl + "x` | `$" + usd + "` USD | Wallets: `" + ww + "`"
+    macos_notify(title, body[:100], sound="Glass")
+    telegram_send(title, body)
+
+def notify_pattern(token):
+    append_to_log(Urgency.CRITICAL, "pattern_matched", token)
+    write_to_dashboard(Urgency.CRITICAL, "pattern_matched", token)
+    sym  = token.get("symbol", token.get("name", "?"))
+    pm   = str(token.get("pattern_match", "?"))
+    sc   = str(token.get("score", "?"))
+    mw   = ", ".join(token.get("matched_with", ["?"]))
+    title = "PATRON -- " + sym
+    body  = "*Match:* `" + pm + "%` | *Score:* `" + sc + "/100`\nSimilar a: _" + mw + "_"
+    macos_notify(title, body[:100], sound="Submarine")
+    tid = token.get("id", sym)
+    kb  = _keyboard(tid, "BUY")
+    telegram_send(title, body, inline_keyboard=kb["inline_keyboard"])
